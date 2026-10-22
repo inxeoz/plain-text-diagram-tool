@@ -10,7 +10,8 @@ This tool implements the specification `spec.md` (PTD-SPEC-001, version 2.0).
 | File | Purpose |
 | :--- | :--- |
 | `index.html` | The tool. One file. It contains the CSS and the JavaScript. |
-| `spec.md` | The specification. |
+| `spec.md` | The specification PTD-SPEC-001 version 2.0. |
+| `spec-addendum.md` | The specification of the four additions. It gives the requirement IDs that the tests use. |
 | `test/acceptance.test.js` | The tests. Run them with `node test/acceptance.test.js`. |
 
 ## How to use the tool
@@ -389,7 +390,8 @@ The test exits with code 0 when every test passes. The test exits with code 1 wh
 
 ## Notes on the specification
 
-The tool has four additions to the specification of version 2.0.
+The tool has four additions to the specification of version 2.0. The requirements of the additions are in
+`spec-addendum.md` (PTD-SPEC-001-A1).
 
 The first addition is the button **Show hint for this type**. The new requirement is: *the tool must be able to
 show a type specific example on request. The tool must not change the source text when it shows the example.*
