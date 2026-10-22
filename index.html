@@ -1365,6 +1365,87 @@
   /* ---------- events ---------- */
 
   sourceEl.addEventListener("input", draw);
+
+  /* Support the Tab key inside the source textarea for spacing/indentation
+     instead of moving focus to the next control. */
+  sourceEl.addEventListener("keydown", function (event) {
+    if (!event || event.key !== "Tab") { return; }
+    if (event.preventDefault) { event.preventDefault(); }
+
+    var start = sourceEl.selectionStart;
+    var end = sourceEl.selectionEnd;
+    if (typeof start !== "number") { start = sourceEl.value.length; }
+    if (typeof end !== "number") { end = start; }
+    var value = sourceEl.value;
+
+    if (start === end) {
+      if (event.shiftKey) {
+        var lineStart = value.lastIndexOf("\n", start - 1) + 1;
+        var line = value.slice(lineStart, value.indexOf("\n", start) === -1 ? value.length : value.indexOf("\n", start));
+        var stripped = line;
+        var remove = 0;
+        if (stripped.charAt(0) === "\t") { remove = 1; stripped = stripped.slice(1); }
+        else if (stripped.slice(0, 2) === "  ") { remove = 2; stripped = stripped.slice(2); }
+        if (remove > 0) {
+          sourceEl.value = value.slice(0, lineStart) + stripped + value.slice(lineStart + line.length);
+          sourceEl.selectionStart = sourceEl.selectionEnd = Math.max(lineStart, start - remove);
+        } else {
+          sourceEl.selectionStart = sourceEl.selectionEnd = start;
+        }
+      } else {
+        sourceEl.value = value.slice(0, start) + "\t" + value.slice(end);
+        sourceEl.selectionStart = sourceEl.selectionEnd = start + 1;
+      }
+    } else {
+      var lineStart = value.lastIndexOf("\n", start - 1) + 1;
+      var lineEnd = value.indexOf("\n", end);
+      if (lineEnd === -1) { lineEnd = value.length; }
+      var block = value.slice(lineStart, lineEnd);
+      var lines = block.split("\n");
+      var newLines;
+      if (event.shiftKey) {
+        var removedPerLine = [];
+        newLines = lines.map(function (line) {
+          if (line.charAt(0) === "\t") { removedPerLine.push(1); return line.slice(1); }
+          if (line.slice(0, 2) === "  ") { removedPerLine.push(2); return line.slice(2); }
+          removedPerLine.push(0);
+          return line;
+        });
+      } else {
+        newLines = lines.map(function (line) { return "\t" + line; });
+      }
+      var newBlock = newLines.join("\n");
+      sourceEl.value = value.slice(0, lineStart) + newBlock + value.slice(lineEnd);
+
+      if (event.shiftKey) {
+        var cursorLine = value.slice(lineStart, start).split("\n").length - 1;
+        var endLine = value.slice(lineStart, end).split("\n").length - 1;
+        var removedBeforeStart = 0;
+        for (var r = 0; r < cursorLine; r++) { removedBeforeStart += removedPerLine[r]; }
+        var beforeCursor = value.slice(lineStart, start);
+        var idxNl = beforeCursor.lastIndexOf("\n");
+        var off = idxNl === -1 ? beforeCursor.length : beforeCursor.length - idxNl - 1;
+        var onCursor = removedPerLine[cursorLine] || 0;
+        var startRemove = onCursor > off ? off : onCursor;
+        sourceEl.selectionStart = Math.max(lineStart, start - removedBeforeStart - startRemove);
+
+        var removedBeforeEnd = 0;
+        for (var r2 = 0; r2 < endLine; r2++) { removedBeforeEnd += removedPerLine[r2]; }
+        var beforeEnd = value.slice(lineStart, end);
+        var idxNl2 = beforeEnd.lastIndexOf("\n");
+        var off2 = idxNl2 === -1 ? beforeEnd.length : beforeEnd.length - idxNl2 - 1;
+        var onEnd = removedPerLine[endLine] || 0;
+        var endRemove = onEnd > off2 ? off2 : onEnd;
+        sourceEl.selectionEnd = Math.max(sourceEl.selectionStart, end - removedBeforeEnd - endRemove);
+      } else {
+        var linesCount = lines.length;
+        sourceEl.selectionStart = start + 1;
+        sourceEl.selectionEnd = end + linesCount;
+      }
+    }
+
+    draw();
+  });
   typeEl.addEventListener("change", function () {
     draw();
     updateHint();
