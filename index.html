@@ -39,15 +39,30 @@
     color: #111;
   }
   button { cursor: pointer; }
-  main { flex: 1 1 auto; display: flex; min-height: 0; }
+  main { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
   .pane {
     width: 50%;
+    flex: 0 0 50%;
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
   }
-  .pane + .pane { border-left: 1px solid #d0d0d0; }
+  .divider {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    margin-left: -0.5px;
+    background: #d0d0d0;
+    cursor: col-resize;
+    touch-action: none;
+    z-index: 2;
+  }
+  .divider:hover, .divider:focus { background: #7a7a7a; outline: none; }
+  .divider::after { content: ""; position: absolute; top: 0; bottom: 0; left: -5px; right: -5px; }
+  body.dragging { cursor: col-resize; user-select: none; }
   .pane-title {
     flex: 0 0 auto;
     padding: 4px 8px;
@@ -57,6 +72,7 @@
     background: #fafafa;
   }
   .pane-note { margin-left: 8px; color: #8a8a8a; }
+  .pane-title select { font-size: 13px; padding: 1px 4px; margin-left: 4px; vertical-align: baseline; }
   .hint {
     flex: 0 0 auto;
     display: none;
@@ -94,14 +110,18 @@
     <select id="type"></select>
   </div>
 </header>
-<main>
-  <section class="pane">
+<main id="panes">
+  <section class="pane" id="workspacePane">
     <div class="pane-title">Source text</div>
     <div id="hintNote" class="hint"></div>
     <textarea id="source" wrap="off" spellcheck="false" aria-label="Source text"></textarea>
   </section>
-  <section class="pane">
-    <div class="pane-title">Output <span id="typeNote" class="pane-note"></span></div>
+  <div class="divider" id="divider" role="separator" aria-orientation="vertical" tabindex="0"
+       aria-label="Change the width of the workspace and the output"></div>
+  <section class="pane" id="outputPane">
+    <div class="pane-title">Output <span id="typeNote" class="pane-note"></span>
+      <span class="pane-note">Example <select id="example" aria-label="Example"></select></span>
+    </div>
     <pre id="output" aria-label="Output"></pre>
   </section>
 </main>
@@ -118,6 +138,7 @@
   var typeNoteEl = document.getElementById("typeNote");
   var hintEl = document.getElementById("hint");
   var hintNoteEl = document.getElementById("hintNote");
+  var exampleEl = document.getElementById("example");
 
   /* ---------- helpers ---------- */
 
@@ -517,80 +538,173 @@
 
   /* ---------- matrix diagram (R-110 .. R-116) ---------- */
 
+  /* The matrix has n rows and n columns. The row and column prefixes make the name of each cell:
+     n = 2 gives TL, TR, BL, BR. n = 3 gives TL, TM, TR, ML, MM, MR, BL, BM, BR.
+     n = 4 gives TL, T2, T3, TR, 2L, 22, 23, 2R, 3L, 32, 33, 3R, BL, B2, B3, BR.
+     The optional line "Size: n" sets the size. The optional line "Levels: name, name" sets the names of the levels. */
+  function matrixPrefixes(size) {
+    if (size === 2) { return { rows: ["T", "B"], cols: ["L", "R"] }; }
+    if (size === 3) { return { rows: ["T", "M", "B"], cols: ["L", "M", "R"] }; }
+    /* the prefix of a row and the prefix of a column are the number of their level.
+       The Y axis runs from High to Low, so the rows count down. */
+    var rows = ["T"];
+    var cols = ["L"];
+    for (var k = 2; k <= size - 1; k++) { cols.push(String(k)); }
+    for (var m = size - 1; m >= 2; m--) { rows.push(String(m)); }
+    rows.push("B");
+    cols.push("R");
+    return { rows: rows, cols: cols };
+  }
+
+  function matrixLevels(size) {
+    if (size === 2) { return ["Low", "High"]; }
+    if (size === 3) { return ["Low", "Medium", "High"]; }
+    var levels = ["Low"];
+    for (var k = 2; k <= size - 1; k++) { levels.push(String(k)); }
+    levels.push("High");
+    return levels;
+  }
+
   function drawMatrix(lines) {
     var src = cleanLines(lines);
     var data = {};
-    var keys = ["X", "Y", "TL", "TR", "BL", "BR", "Items"];
-    var i;
-    var j;
+    var i, j, k;
     for (i = 0; i < src.length; i++) {
-      var match = /^([A-Za-z]+)\s*:\s*(.*)$/.exec(src[i]);
+      var match = /^([A-Za-z0-9]+)\s*:\s*(.*)$/.exec(src[i]);
       if (!match) { continue; }
       var key = match[1].toUpperCase();
       if (data[key] === undefined) { data[key] = match[2].trim(); }
     }
-    for (i = 0; i < keys.length; i++) {
-      if (data[keys[i].toUpperCase()] === undefined) { return "error: missing " + keys[i]; }
+    if (data.X === undefined) { return "error: missing X"; }
+    if (data.Y === undefined) { return "error: missing Y"; }
+
+    var size = 0;
+    if (data.SIZE !== undefined) {
+      size = parseInt(data.SIZE, 10);
+      if (!(size >= 2) || size > 26) { return "error: bad size"; }
+    } else {
+      var rowSet = {};
+      var colSet = {};
+      for (var name in data) {
+        if (name === "X" || name === "Y" || name === "ITEMS" || name === "SIZE" || name === "LEVELS") { continue; }
+        rowSet[name.charAt(0)] = true;
+        colSet[name.charAt(name.length - 1)] = true;
+      }
+      var rowCount = 0;
+      var colCount = 0;
+      for (k in rowSet) { rowCount++; }
+      for (k in colSet) { colCount++; }
+      size = rowCount > colCount ? rowCount : colCount;
+      if (size < 2) { size = 2; }
     }
 
-    var items = { TL: [], TR: [], BL: [], BR: [] };
-    var parts = data.ITEMS.split(",");
-    for (i = 0; i < parts.length; i++) {
-      var part = parts[i].trim();
-      if (part === "") { continue; }
-      var im = /^(.*)\((TL|TR|BL|BR)\)$/.exec(part);
-      if (!im) { continue; }
-      var name = im[1].trim();
-      if (name !== "") { items[im[2]].push(name); }
+    /* the middle level of a matrix of three is called M. The number 2 is the same level. */
+    function matrixKey(key) {
+      if (size === 3) { return key.replace(/2/g, "M"); }
+      return key;
     }
 
-    var yName = data.Y;
-    var yWidth = Math.max(yName.length, 4, 3) + 1;
+    var values = {};
+    for (var cellKey in data) {
+      if (cellKey === "X" || cellKey === "Y" || cellKey === "ITEMS" || cellKey === "SIZE" || cellKey === "LEVELS") { continue; }
+      values[matrixKey(cellKey)] = data[cellKey];
+    }
 
-    var quadrants = [
-      { key: "TL", text: data.TL, items: items.TL },
-      { key: "TR", text: data.TR, items: items.TR },
-      { key: "BL", text: data.BL, items: items.BL },
-      { key: "BR", text: data.BR, items: items.BR }
-    ];
+    var prefixes = matrixPrefixes(size);
+    var cells = [];
+    for (i = 0; i < size; i++) {
+      var row = [];
+      for (j = 0; j < size; j++) {
+        var name = prefixes.rows[i] + prefixes.cols[j];
+        if (values[name] === undefined) { return "error: missing " + name; }
+        row.push({ text: values[name], items: [] });
+      }
+      cells.push(row);
+    }
+
+    if (data.ITEMS === undefined) { return "error: missing Items"; }
+
+    {
+      var parts = data.ITEMS.split(",");
+      for (i = 0; i < parts.length; i++) {
+        var part = parts[i].trim();
+        if (part === "") { continue; }
+        var im = /^(.*)\(([^()]+)\)$/.exec(part);
+        if (!im) { return "error: bad item"; }
+        var itemName = im[1].trim();
+        var itemKey = matrixKey(im[2].trim().toUpperCase());
+        var cell = null;
+        for (var r = 0; r < size && cell === null; r++) {
+          for (var c = 0; c < size; c++) {
+            if (prefixes.rows[r] + prefixes.cols[c] === itemKey) { cell = cells[r][c]; break; }
+          }
+        }
+        if (cell === null) { return "error: bad item"; }
+        if (itemName !== "") { cell.items.push(itemName); }
+      }
+    }
+
+    var levels;
+    if (data.LEVELS !== undefined) {
+      levels = data.LEVELS.split(",");
+      for (i = 0; i < levels.length; i++) { levels[i] = levels[i].trim(); }
+      if (levels.length !== size) { return "error: bad levels"; }
+    } else {
+      levels = matrixLevels(size);
+    }
+
+    var yWidth = Math.max(data.Y.length, 4, 3) + 1;
+    for (i = 0; i < levels.length; i++) {
+      if (levels[i].length + 1 > yWidth) { yWidth = levels[i].length + 1; }
+    }
+
     var longest = 0;
-    for (i = 0; i < quadrants.length; i++) {
-      quadrants[i].itemText = quadrants[i].items.join(", ");
-      if (quadrants[i].text.length > longest) { longest = quadrants[i].text.length; }
-      if (quadrants[i].itemText.length > longest) { longest = quadrants[i].itemText.length; }
+    for (i = 0; i < size; i++) {
+      for (j = 0; j < size; j++) {
+        if (cells[i][j].text.length > longest) { longest = cells[i][j].text.length; }
+        if (cells[i][j].items.join(", ").length > longest) { longest = cells[i][j].items.join(", ").length; }
+      }
     }
     var cellWidth = longest + 4;
-    var widths = [cellWidth - 2, cellWidth - 2];
+    var widths = [];
+    for (i = 0; i < size; i++) { widths.push(cellWidth - 2); }
 
     var firstLabel = yWidth + 3;
-    var secondLabel = firstLabel + cellWidth + 3;
+    var labelColumns = [];
+    for (i = 0; i < size; i++) { labelColumns.push(firstLabel + i * (cellWidth + 3)); }
+    var lastLabel = labelColumns[size - 1];
+    var lastName = levels[size - 1];
 
     var out = [];
-
-    var label2 = "High";
-    var nameStart = Math.floor((firstLabel + (secondLabel + label2.length - 1)) / 2) - Math.floor(data.X.length / 2);
+    var nameStart = Math.floor((firstLabel + (lastLabel + lastName.length - 1)) / 2) - Math.floor(data.X.length / 2);
     if (nameStart < 0) { nameStart = 0; }
     out.push(repeat(" ", nameStart) + data.X);
 
     var axisLine = [];
-    for (i = 0; i < secondLabel + label2.length; i++) { axisLine.push(" "); }
-    axisLine[firstLabel] = "L";
-    axisLine[firstLabel + 1] = "o";
-    axisLine[firstLabel + 2] = "w";
-    axisLine[secondLabel] = "H";
-    axisLine[secondLabel + 1] = "i";
-    axisLine[secondLabel + 2] = "g";
-    axisLine[secondLabel + 3] = "h";
+    for (i = 0; i < lastLabel + lastName.length; i++) { axisLine.push(" "); }
+    for (i = 0; i < size; i++) {
+      var label = levels[i];
+      for (j = 0; j < label.length; j++) { axisLine[labelColumns[i] + j] = label.charAt(j); }
+    }
     out.push(axisLine.join(""));
 
     var gap = repeat(" ", yWidth);
-    out.push(gap + tableBorder("┌", "┬", "┐", widths));
-    out.push(padRight("High", yWidth) + tableRow([quadrants[0].text, quadrants[1].text], widths));
-    out.push(padRight(yName, yWidth) + tableRow([quadrants[0].itemText, quadrants[1].itemText], widths));
-    out.push(gap + tableBorder("├", "┼", "┤", widths));
-    out.push(padRight("Low", yWidth) + tableRow([quadrants[2].text, quadrants[3].text], widths));
-    out.push(padRight(yName, yWidth) + tableRow([quadrants[2].itemText, quadrants[3].itemText], widths));
-    out.push(gap + tableBorder("└", "┴", "┘", widths));
+    for (i = 0; i < size; i++) {
+      if (i === 0) {
+        out.push(gap + tableBorder("\u250c", "\u252c", "\u2510", widths));
+      } else {
+        out.push(gap + tableBorder("\u251c", "\u253c", "\u2524", widths));
+      }
+      var texts = [];
+      var itemTexts = [];
+      for (j = 0; j < size; j++) {
+        texts.push(cells[i][j].text);
+        itemTexts.push(cells[i][j].items.join(", "));
+      }
+      out.push(padRight(levels[size - 1 - i], yWidth) + tableRow(texts, widths));
+      out.push(padRight(data.Y, yWidth) + tableRow(itemTexts, widths));
+    }
+    out.push(gap + tableBorder("\u2514", "\u2534", "\u2518", widths));
     return out.join("\n");
   }
 
@@ -909,6 +1023,63 @@
     return out.join("\n");
   }
 
+  /* ---------- the examples of the types ---------- */
+
+  var EXAMPLES = {
+    tree: [
+      { name: "Project tree", source: "project/\n  src/\n    main.js\n  README.md" },
+      { name: "Nested list", source: "root\n  one\n    two\n      three\n  four\nfive" }
+    ],
+    table: [
+      { name: "Task table", source: "Task|Owner|Due\nSpec|Ana|Mon\nBuild|Chen|Wed" },
+      { name: "Long cells", source: "Name|Team|Note\nAna|Backend|Keeps the service alive\nChen|Frontend|Finds the bugs" }
+    ],
+    flow: [
+      { name: "Three steps", source: "Draft -> Review -> Approved" },
+      { name: "Two chains", source: "Start -> Work\nWork -> Done" }
+    ],
+    checklist: [
+      { name: "Release checklist", source: "[x] Tests pass\n[ ] Security scan\n[x] Changelog\n[ ] Deploy" },
+      { name: "Two items", source: "[x] Done\n[ ] Not done" }
+    ],
+    bar: [
+      { name: "Fruit", source: "Apples: 50\nBananas: 30\nCherries: 75\nDates: 10" },
+      { name: "Two bars", source: "Alpha: 10\nBeta: 20" }
+    ],
+    state: [
+      { name: "Three states", source: "Draft --submit--> Review\nReview --approve--> Approved\nApproved --publish--> Published" },
+      { name: "Two states", source: "Open --close--> Closed" }
+    ],
+    timeline: [
+      { name: "Four quarters", source: "Q1: Research, Spec\nQ2: Build, MVP\nQ3: Beta, Feedback\nQ4: Launch, Retro" },
+      { name: "Three periods", source: "Q1: Plan, Build\nQ2: Test\nQ3: Ship" }
+    ],
+    kanban: [
+      { name: "Three columns", source: "[Backlog]\nA\nB\n\n[In Progress]\nC\nD\n\n[Done]\nG" },
+      { name: "Two columns", source: "[Todo]\nA\nB\n\n[Done]\nC" }
+    ],
+    matrix: [
+      { name: "Two by two", source: "X: Effort\nY: Impact\nTL: Quick wins\nTR: Big bets\nBL: Fill-ins\nBR: Avoid\nItems: Feature A(TL), Feature B(TR)" },
+      { name: "Three by three", source: "X: Effort\nY: Impact\nLevels: Low, Medium, High\nTL: Quick wins\nTM: Fill in\nTR: Big bets\nML: Easy later\nMM: Steady\nMR: Costly\nBL: Avoid\nBM: Later\nBR: Blocked\nItems: Feature A(TL), Feature B(TR), Feature C(MM)" }
+    ],
+    heatmap: [
+      { name: "Week", source: "|   | Mon | Tue | Wed | Thu |\n|AM | 1   | 3   | 2   | 0   |\n|PM | 2   | 1   | 3   | 2   |" },
+      { name: "Two rows", source: "|   | Mon | Tue |\n|AM | 1 | 2 |\n|PM | 3 | 0 |" }
+    ],
+    sequence: [
+      { name: "Login", source: "User -> Web: login\nWeb -> API: auth\nAPI -> DB: query\nDB -> API: data\nAPI -> Web: token\nWeb -> User: OK" },
+      { name: "Two parts", source: "Client -> Server: request\nServer -> Client: response" }
+    ],
+    swimlane: [
+      { name: "Three lanes", source: "Customer: Submit -> Receive\nSupport: Triage -> Resolve\nEngineering: Fix -> Verify" },
+      { name: "Two lanes", source: "Sales: Call -> Order\nSupport: Answer -> Close" }
+    ],
+    gantt: [
+      { name: "Four tasks", source: "Plan: 0-10\nBuild: 10-25\nTest: 25-35\nRelease: 35-40" },
+      { name: "Two tasks", source: "Design: 0-5\nBuild: 5-15" }
+    ]
+  };
+
   /* ---------- the types (Section 4.0) ---------- */
 
   var TYPES = [
@@ -1071,6 +1242,7 @@
     }
     outputEl.textContent = type.draw(splitLines(text));
     typeNoteEl.textContent = "Type: " + type.name;
+    if (id !== exampleType) { fillExampleList(); }
   }
 
   /* ---------- the selector (R-011, R-012) ---------- */
@@ -1089,12 +1261,114 @@
     }
   }
 
+  /* ---------- the examples of the selected type ---------- */
+
+  var exampleType = "";
+
+  function exampleId() {
+    var id = typeEl.value;
+    if (id === "auto") { id = detectType(sourceEl.value); }
+    return id;
+  }
+
+  function fillExampleList() {
+    while (exampleEl.firstChild) { exampleEl.removeChild(exampleEl.firstChild); }
+    var id = exampleId();
+    exampleType = id;
+    var first = document.createElement("option");
+    first.value = "";
+    first.text = "Select an example";
+    exampleEl.appendChild(first);
+    var list = EXAMPLES[id] || [];
+    for (var i = 0; i < list.length; i++) {
+      var option = document.createElement("option");
+      option.value = String(i);
+      option.text = list[i].name;
+      exampleEl.appendChild(option);
+    }
+  }
+
+  exampleEl.addEventListener("change", function () {
+    var list = EXAMPLES[exampleType] || [];
+    var index = parseInt(exampleEl.value, 10);
+    if (isNaN(index) || !list[index]) { return; }
+    sourceEl.value = list[index].source;
+    draw();
+  });
+
+  /* ---------- the draggable divider ---------- */
+
+  var dividerEl = document.getElementById("divider");
+  var panesEl = document.getElementById("panes");
+  var workspacePane = document.getElementById("workspacePane");
+  var outputPane = document.getElementById("outputPane");
+  var dragging = false;
+  var ratio = 0.5;
+
+  function limitRatio(value) {
+    var width = panesEl.getBoundingClientRect().width;
+    var least = 0.08;
+    if (width > 0) { least = Math.min(0.5, 120 / width); }
+    if (value < least) { value = least; }
+    if (value > 1 - least) { value = 1 - least; }
+    return value;
+  }
+
+  function setRatio(value) {
+    ratio = limitRatio(value);
+    var percent = (ratio * 100).toFixed(2) + "%";
+    workspacePane.style.flex = "0 0 " + percent;
+    outputPane.style.flex = "0 0 " + (100 - ratio * 100).toFixed(2) + "%";
+    dividerEl.style.left = percent;
+    dividerEl.setAttribute("aria-valuenow", Math.round(ratio * 100));
+  }
+
+  dividerEl.addEventListener("pointerdown", function (event) {
+    dragging = true;
+    try {
+      if (dividerEl.setPointerCapture) { dividerEl.setPointerCapture(event.pointerId); }
+    } catch (error) { /* the browser does not have this pointer */ }
+    document.body.classList.add("dragging");
+    event.preventDefault();
+  });
+
+  dividerEl.addEventListener("pointermove", function (event) {
+    if (!dragging) { return; }
+    var rect = panesEl.getBoundingClientRect();
+    if (rect.width <= 0) { return; }
+    setRatio((event.clientX - rect.left) / rect.width);
+  });
+
+  function stopDragging(event) {
+    dragging = false;
+    document.body.classList.remove("dragging");
+    try {
+      if (event && dividerEl.releasePointerCapture && dividerEl.hasPointerCapture && dividerEl.hasPointerCapture(event.pointerId)) {
+        dividerEl.releasePointerCapture(event.pointerId);
+      }
+    } catch (error) { /* the browser does not have this pointer */ }
+  }
+
+  dividerEl.addEventListener("pointerup", stopDragging);
+  dividerEl.addEventListener("pointercancel", stopDragging);
+  dividerEl.addEventListener("dblclick", function () { setRatio(0.5); });
+
+  dividerEl.addEventListener("keydown", function (event) {
+    if (event.key === "ArrowLeft") { setRatio(ratio - 0.02); }
+    else if (event.key === "ArrowRight") { setRatio(ratio + 0.02); }
+    else if (event.key === "Home") { setRatio(0); }
+    else if (event.key === "End") { setRatio(1); }
+    else { return; }
+    event.preventDefault();
+  });
+
   /* ---------- events ---------- */
 
   sourceEl.addEventListener("input", draw);
   typeEl.addEventListener("change", function () {
     draw();
     updateHint();
+    fillExampleList();
   });
 
   /* The hint button shows an example for the type. The button never changes the source text. */
@@ -1158,6 +1432,7 @@
   fillSelector();
   sourceEl.value = EXAMPLE;
   draw();
+  fillExampleList();
 })();
 </script>
 </body>

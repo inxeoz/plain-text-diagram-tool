@@ -19,7 +19,12 @@ This tool implements the specification `spec.md` (PTD-SPEC-001, version 2.0).
 2. Put the source text in the workspace on the left.
 3. The tool draws the diagram on the right. The tool draws the diagram on every change of the source text.
 4. Choose a type in the selector at the top right if the automatic choice is not the one that the user wants.
-5. Press **Copy output** and paste the diagram into a markdown file.
+5. Choose an example in the dropdown next to the output title. The example fills the workspace and the tool draws
+   the diagram. The dropdown always holds the examples of the selected type.
+6. Press **Copy output** and paste the diagram into a markdown file.
+7. Drag the line between the two panes to change the width of the workspace and the output. The line has the mouse
+   pointer of a resize. Press the arrow keys when the line has the focus to move it. A double click puts the two
+   panes back at 50% of the width.
 
 The tool works with no internet connection. The tool sends no data to a network. The tool uses no cookie.
 
@@ -202,6 +207,65 @@ Impact │              │              │
        └──────────────┴──────────────┘
 ```
 
+#### A matrix of any size
+
+The matrix can have n rows and n columns. The tool finds the size from the cell names. The name of a cell is
+the name of its row and the name of its column.
+
+| Size | The cell names |
+| :--- | :--- |
+| 2 | TL, TR, BL, BR |
+| 3 | TL, TM, TR, ML, MM, MR, BL, BM, BR |
+| 4 | TL, T2, T3, TR, 3L, 32, 33, 3R, 2L, 22, 23, 2R, BL, B2, B3, BR |
+
+The name of a row and the name of a column are the number of the level of that row or column. The Y axis runs
+from High to Low, so the rows count down. For a matrix of three the middle level is M. The number 2 is the same
+level as M.
+
+The tool uses these names of the levels: Low and High for a matrix of two, Low, Medium and High for a matrix of
+three, and Low, the numbers, and High for a matrix of four or more.
+
+Two lines are optional:
+
+- `Size: n` sets the size of the matrix. The tool needs this line when the source text does not have every cell.
+- `Levels: name, name, name` sets the names of the levels. The names go from Low to High. The Y axis uses the
+  same names in the other order.
+
+```text
+X: Effort
+Y: Impact
+Levels: Low, Medium, High
+TL: Quick wins
+TM: Fill in
+TR: Big bets
+ML: Easy later
+MM: Steady
+MR: Costly
+BL: Avoid
+BM: Later
+BR: Blocked
+Items: Feature A(TL), Feature B(TR), Feature C(MM)
+```
+
+```text
+                         Effort
+          Low              Medium           High
+       ┌──────────────┬──────────────┬──────────────┐
+High   │ Quick wins   │ Fill in      │ Big bets     │
+Impact │ Feature A    │              │ Feature B    │
+       ├──────────────┼──────────────┼──────────────┤
+Medium │ Easy later   │ Steady       │ Costly       │
+Impact │              │ Feature C    │              │
+       ├──────────────┼──────────────┼──────────────┤
+Low    │ Avoid        │ Later        │ Blocked      │
+Impact │              │              │              │
+       └──────────────┴──────────────┴──────────────┘
+```
+
+The matrix type shows these errors: `error: missing <line name>` for a missing line or a missing cell,
+`error: bad size` for a size that is not a number, `error: bad levels` when the number of the levels is not the
+size of the matrix, and `error: bad item` when an item names no cell.
+
 ### Heatmap
 
 ```text
@@ -325,10 +389,24 @@ The test exits with code 0 when every test passes. The test exits with code 1 wh
 
 ## Notes on the specification
 
-The tool has one addition to the specification of version 2.0: the button **Show hint for this type**. The new
-requirement is: *the tool must be able to show a type specific example on request. The tool must not change the
-source text when it shows the example.* The tests for the button are in `test/acceptance.test.js` with the names
-`R-HINT-001`, `R-HINT-002` and `R-HINT-003`.
+The tool has four additions to the specification of version 2.0.
+
+The first addition is the button **Show hint for this type**. The new requirement is: *the tool must be able to
+show a type specific example on request. The tool must not change the source text when it shows the example.*
+The tests for the button are in `test/acceptance.test.js` with the names `R-HINT-001`, `R-HINT-002` and
+`R-HINT-003`.
+
+The second addition is the line between the workspace and the output. The user can drag the line to change the
+width of the two panes. The panes start at 50% of the window width, so R-172 holds until the user moves the line.
+The tests for the line are in `test/acceptance.test.js` with the names `R-DRAG-001` to `R-DRAG-005`.
+
+The third addition is the dropdown of examples next to the output title. The dropdown holds the examples of the
+selected type. The user chooses an example and the example fills the workspace. The tests for the dropdown are in
+`test/acceptance.test.js` with the names `R-EXAMPLE-001` to `R-EXAMPLE-005`.
+
+The fourth addition is the matrix of n rows and n columns. The specification of version 2.0 only has the matrix of
+two rows and two columns (R-110 .. R-116). The tool keeps the two by two form and adds the other sizes. The tests
+for the new sizes are in `test/acceptance.test.js` with the names `R-MATRIX-001` to `R-MATRIX-008`.
 
 The specification has four places where two parts of the document do not agree. The tool follows these rules.
 

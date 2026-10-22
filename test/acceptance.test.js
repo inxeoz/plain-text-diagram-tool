@@ -25,16 +25,36 @@ function loadTool() {
   function make(tag) {
     return {
       tagName: tag, value: "", textContent: "", selected: false, children: [], options: [], style: {},
+      attributes: {},
       addEventListener: (name, fn) => { listeners[tag + ":" + name] = fn; },
-      appendChild(child) { this.children.push(child); if (this.options) { this.options.push(child); } return child; }
+      appendChild(child) { this.children.push(child); if (this.options) { this.options.push(child); } return child; },
+      get firstChild() { return this.children[0] || null; },
+      removeChild(child) {
+        this.children = this.children.filter((c) => c !== child);
+        if (this.options) { this.options = this.options.filter((c) => c !== child); }
+        return child;
+      },
+      getAttribute(name) { return this.attributes[name]; },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      getBoundingClientRect() { return { left: 0, top: 0, width: 1000, height: 600, right: 1000, bottom: 600 }; }
     };
   }
   const elements = {
     source: make("source"), output: make("output"), type: make("type"),
-    copy: make("copy"), typeNote: make("typeNote"), hint: make("hint"), hintNote: make("hintNote")
+    copy: make("copy"), typeNote: make("typeNote"), hint: make("hint"), hintNote: make("hintNote"),
+    divider: make("divider"), panes: make("panes"), example: make("example"),
+    workspacePane: make("workspacePane"), outputPane: make("outputPane")
+  };
+  const body = {
+    classList: {
+      names: [],
+      add(name) { if (this.names.indexOf(name) < 0) { this.names.push(name); } },
+      remove(name) { this.names = this.names.filter((n) => n !== name); }
+    }
   };
   elements.type.value = "auto";
   const document = {
+    body: body,
     getElementById: (id) => elements[id],
     createElement: (tag) => make(tag),
     createRange: () => ({ selectNodeContents: () => {} }),
@@ -493,6 +513,109 @@ test("R-156 - a range that does not increase shows an error", function () {
   same(draw("Task: 10-5", "gantt"), "error: bad range", "the tool must show an error");
 });
 
+/* The example dropdown - an addition to the specification of version 2.0 */
+
+test("R-EXAMPLE-001 - the dropdown holds the examples of the selected type", function () {
+  const tool = loadTool();
+  tool.elements.type.value = "flow";
+  tool.listeners["type:change"]();
+  const options = tool.elements.example.options.map((o) => o.text);
+  if (options[0] !== "Select an example") { throw new Error("the dropdown must have a first option"); }
+  if (options.length !== 3) { throw new Error("the dropdown must hold the examples of the flow type: " + options.join(",")); }
+  if (options[1].indexOf("Three steps") < 0) { throw new Error("the dropdown must hold the examples of the flow type"); }
+});
+
+test("R-EXAMPLE-002 - the dropdown holds the examples of every type", function () {
+  const tool = loadTool();
+  const ids = ["tree", "table", "flow", "checklist", "bar", "state", "timeline", "kanban", "matrix", "heatmap", "sequence", "swimlane", "gantt"];
+  ids.forEach((id) => {
+    tool.elements.type.value = id;
+    tool.listeners["type:change"]();
+    const options = tool.elements.example.options;
+    if (options.length < 3) { throw new Error("the type " + id + " must have examples"); }
+  });
+});
+
+test("R-EXAMPLE-003 - choosing an example fills the workspace and draws the diagram", function () {
+  const tool = loadTool();
+  tool.elements.type.value = "checklist";
+  tool.listeners["type:change"]();
+  tool.elements.example.value = "0";
+  tool.listeners["example:change"]();
+  if (tool.elements.source.value.indexOf("[x] Tests pass") < 0) { throw new Error("the example must fill the workspace"); }
+  if (tool.elements.output.textContent.indexOf("☑ Tests pass") < 0) { throw new Error("the example must draw the diagram"); }
+});
+
+test("R-EXAMPLE-004 - the dropdown follows the type", function () {
+  const tool = loadTool();
+  tool.elements.type.value = "tree";
+  tool.listeners["type:change"]();
+  const tree = tool.elements.example.options[1].text;
+  tool.elements.type.value = "gantt";
+  tool.listeners["type:change"]();
+  const gantt = tool.elements.example.options[1].text;
+  if (tree === gantt) { throw new Error("the dropdown must follow the type"); }
+});
+
+test("R-EXAMPLE-005 - the dropdown must not change the source text by itself", function () {
+  const tool = loadTool();
+  tool.elements.source.value = "my own text";
+  tool.listeners["source:input"]();
+  tool.elements.type.value = "tree";
+  tool.listeners["type:change"]();
+  if (tool.elements.source.value !== "my own text") { throw new Error("the dropdown must not change the source text"); }
+});
+
+/* The draggable divider - an addition to the specification of version 2.0 */
+
+test("R-DRAG-001 - the divider is between the workspace and the output", function () {
+  const tool = loadTool();
+  const divider = tool.elements.divider;
+  if (!divider) { throw new Error("the tool must have a divider"); }
+  const markup = html.match(/<div class="divider"[^>]*>/);
+  if (!markup) { throw new Error("the tool must have a divider between the panes"); }
+  if (markup[0].indexOf('role="separator"') < 0) { throw new Error("the divider must be a separator"); }
+  if (markup[0].indexOf('aria-orientation="vertical"') < 0) { throw new Error("the divider must be vertical"); }
+  if (markup[0].indexOf('tabindex="0"') < 0) { throw new Error("the divider must work with the keyboard"); }
+});
+
+test("R-DRAG-002 - the drag changes the width of the panes", function () {
+  const tool = loadTool();
+  tool.listeners["divider:pointerdown"]({ pointerId: 1, preventDefault: () => {} });
+  tool.listeners["divider:pointermove"]({ pointerId: 1, clientX: 250 });
+  tool.listeners["divider:pointerup"]({ pointerId: 1 });
+  const left = tool.elements.workspacePane.style.flex;
+  const right = tool.elements.outputPane.style.flex;
+  if (left.indexOf("25") < 0) { throw new Error("the drag must change the width of the workspace: " + left); }
+  if (right.indexOf("75") < 0) { throw new Error("the drag must change the width of the output: " + right); }
+});
+
+test("R-DRAG-003 - the drag must not make a pane too small", function () {
+  const tool = loadTool();
+  tool.listeners["divider:pointerdown"]({ pointerId: 1, preventDefault: () => {} });
+  tool.listeners["divider:pointermove"]({ pointerId: 1, clientX: 0 });
+  tool.listeners["divider:pointerup"]({ pointerId: 1 });
+  const left = tool.elements.workspacePane.style.flex;
+  if (left.indexOf("12") < 0) { throw new Error("the workspace must keep a usable width: " + left); }
+});
+
+test("R-DRAG-004 - the arrow keys move the divider", function () {
+  const tool = loadTool();
+  tool.listeners["divider:keydown"]({ key: "ArrowRight", preventDefault: () => {} });
+  if (tool.elements.workspacePane.style.flex.indexOf("52") < 0) {
+    throw new Error("the arrow key must move the divider: " + tool.elements.workspacePane.style.flex);
+  }
+  tool.listeners["divider:keydown"]({ key: "ArrowLeft", preventDefault: () => {} });
+  if (tool.elements.workspacePane.style.flex.indexOf("50") < 0) {
+    throw new Error("the arrow key must move the divider back: " + tool.elements.workspacePane.style.flex);
+  }
+});
+
+test("R-DRAG-005 - the panes start at 50% of the width", function () {
+  if (!/width:\s*50%/.test(html)) { throw new Error("the panes must get 50% of the width"); }
+  if (!/flex:\s*0 0 50%/.test(html)) { throw new Error("the panes must start at 50% of the width"); }
+});
+
 /* The hint button - an addition to the specification of version 2.0 */
 
 /* R-HINT-001 - the tool can show an example for the type on request */
@@ -525,6 +648,55 @@ test("R-HINT-003 - the hint button hides the hint again", function () {
   if (tool.elements.hintNote.textContent === "") { throw new Error("the hint must show an example"); }
   tool.listeners["hint:click"]();
   if (tool.elements.hintNote.textContent !== "") { throw new Error("the hint must hide the example"); }
+});
+
+/* The matrix can have n rows and n columns. These tests are an addition to the specification of version 2.0. */
+
+const MATRIX3_SOURCE = "X: Effort\nY: Impact\nLevels: Low, Medium, High\nTL: Quick wins\nTM: Fill in\nTR: Big bets\nML: Easy later\nMM: Steady\nMR: Costly\nBL: Avoid\nBM: Later\nBR: Blocked\nItems: Feature A(TL), Feature B(TR), Feature C(MM)";
+const MATRIX3_OUTPUT = "                         Effort\n          Low              Medium           High\n       \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\nHigh   \u2502 Quick wins   \u2502 Fill in      \u2502 Big bets     \u2502\nImpact \u2502 Feature A    \u2502              \u2502 Feature B    \u2502\n       \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\nMedium \u2502 Easy later   \u2502 Steady       \u2502 Costly       \u2502\nImpact \u2502              \u2502 Feature C    \u2502              \u2502\n       \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\nLow    \u2502 Avoid        \u2502 Later        \u2502 Blocked      \u2502\nImpact \u2502              \u2502              \u2502              \u2502\n       \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518";
+const MATRIX4_SOURCE = "X: Priority\nY: Size\nTL: a\nT2: b\nT3: c\nTR: d\n2L: e\n22: f\n23: g\n2R: h\n3L: i\n32: j\n33: k\n3R: l\nBL: m\nB2: n\nB3: o\nBR: p\nItems: one(TL), two(22)";
+const MATRIX4_OUTPUT = "                    Priority\n        Low       2         3         High\n     \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\nHigh \u2502 a     \u2502 b     \u2502 c     \u2502 d     \u2502\nSize \u2502 one   \u2502       \u2502       \u2502       \u2502\n     \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n3    \u2502 i     \u2502 j     \u2502 k     \u2502 l     \u2502\nSize \u2502       \u2502       \u2502       \u2502       \u2502\n     \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\n2    \u2502 e     \u2502 f     \u2502 g     \u2502 h     \u2502\nSize \u2502       \u2502 two   \u2502       \u2502       \u2502\n     \u251c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u253c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2524\nLow  \u2502 m     \u2502 n     \u2502 o     \u2502 p     \u2502\nSize \u2502       \u2502       \u2502       \u2502       \u2502\n     \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2534\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518";
+
+test("R-MATRIX-001 - a matrix of three rows and three columns", function () {
+  same(draw(MATRIX3_SOURCE, "matrix"), MATRIX3_OUTPUT, "the matrix of three must equal the expected output");
+});
+
+test("R-MATRIX-002 - a matrix of four rows and four columns", function () {
+  same(draw(MATRIX4_SOURCE, "matrix"), MATRIX4_OUTPUT, "the matrix of four must equal the expected output");
+});
+
+test("R-MATRIX-003 - the size of the matrix can be set with the Size line", function () {
+  const source = "X: Effort\nY: Impact\nSize: 3\nTL: a\nTM: b\nTR: c\nML: d\nMM: e\nMR: f\nBL: g\nBM: h\nBR: i\nItems: one(TL)";
+  const out = draw(source, "matrix");
+  if (out.indexOf("Medium") < 0) { throw new Error("the size line must make a matrix of three"); }
+  if (out.indexOf("│ a ") < 0) { throw new Error("the cells must be in the grid"); }
+});
+
+test("R-MATRIX-004 - the names of the levels can be set with the Levels line", function () {
+  const source = "X: Effort\nY: Impact\nLevels: Cheap, Middle, Dear\nTL: a\nTM: b\nTR: c\nML: d\nMM: e\nMR: f\nBL: g\nBM: h\nBR: i\nItems: one(TL)";
+  const out = draw(source, "matrix");
+  if (out.indexOf("Cheap") < 0 || out.indexOf("Dear") < 0) { throw new Error("the levels line must set the names"); }
+  if (out.indexOf("Medium") >= 0) { throw new Error("the levels line must replace the default names"); }
+});
+
+test("R-MATRIX-005 - the number of the levels must match the size of the matrix", function () {
+  const source = "X: Effort\nY: Impact\nLevels: Low, High\nTL: a\nTM: b\nTR: c\nML: d\nMM: e\nMR: f\nBL: g\nBM: h\nBR: i\nItems: one(TL)";
+  same(draw(source, "matrix"), "error: bad levels", "the tool must show an error");
+});
+
+test("R-MATRIX-006 - an item that names no cell shows an error", function () {
+  const source = "X: Effort\nY: Impact\nTL: a\nTR: b\nBL: c\nBR: d\nItems: one(XX)";
+  same(draw(source, "matrix"), "error: bad item", "the tool must show an error");
+});
+
+test("R-MATRIX-007 - a size that is not a number shows an error", function () {
+  const source = "X: Effort\nY: Impact\nSize: x\nTL: a\nTR: b\nBL: c\nBR: d\nItems: one(TL)";
+  same(draw(source, "matrix"), "error: bad size", "the tool must show an error");
+});
+
+test("R-MATRIX-008 - a missing cell shows an error with the name of the cell", function () {
+  const source = "X: Effort\nY: Impact\nSize: 3\nTL: a\nTM: b\nTR: c\nML: d\nMM: e\nMR: f\nBL: g\nBM: h\nItems: one(TL)";
+  same(draw(source, "matrix"), "error: missing BR", "the tool must show an error");
 });
 
 /* R-030 .. R-046 - the types of version 1.0 */
