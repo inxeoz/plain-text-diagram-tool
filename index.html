@@ -15,6 +15,34 @@
     font-size: 14px;
     color: #111;
     background: #fff;
+    transition: background 0.3s, color 0.3s;
+  }
+  body.dark {
+    background: #111;
+    color: #f6f6f6;
+  }
+  body.dark header {
+    background: #222;
+    border-color: #444;
+  }
+  body.dark .pane-title {
+    background: #333;
+    border-color: #555;
+    color: #ddd;
+  }
+  body.dark .pane-note, body.dark .hint, body.dark .hintNote {
+    color: #aaa;
+  }
+  body.dark .divider {
+    background: #555;
+  }
+  body.dark .divider:hover, body.dark .divider:focus {
+    background: #777;
+  }
+  body.dark select, body.dark button {
+    background: #333;
+    color: #f6f6f6;
+    border-color: #555;
   }
   header {
     flex: 0 0 auto;
@@ -98,12 +126,15 @@
   }
   textarea { background: #fff; }
   pre { background: #fff; }
+  body.dark textarea { background: #222; color: #f6f6f6; }
+  body.dark pre { background: #222; color: #f6f6f6; }
 </style>
 </head>
 <body>
 <header>
   <h1>Plain Text Diagram Tool</h1>
   <div class="controls">
+    <button id="theme" type="button">🌙</button>
     <button id="copy" type="button">Copy output</button>
     <button id="hint" type="button">Show hint for this type</button>
     <label for="type">Type</label>
@@ -1509,6 +1540,20 @@
       done();
     }
   });
+
+  /* Theme toggle */
+  var themeEl = document.getElementById("theme");
+  var isDark = false;
+
+  function toggleTheme() {
+    isDark = !isDark;
+    if (document.body) { document.body.classList.toggle("dark", isDark); }
+    if (themeEl) { themeEl.textContent = isDark ? "☀️" : "🌙"; }
+  }
+
+  if (themeEl) {
+    themeEl.addEventListener("click", toggleTheme);
+  }
 
   fillSelector();
   sourceEl.value = EXAMPLE;
